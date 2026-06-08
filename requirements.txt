@@ -12,3 +12,4 @@ httpx
 alembic
 aiosmtplib
 jinja2
+aiosqlite
