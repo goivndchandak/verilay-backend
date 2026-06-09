@@ -1,50 +1,56 @@
 """
 Verilay — Main Application
-FastAPI app entry point with CORS, router registration, and startup tasks.
-
-Run with:
-    uvicorn main:app --reload --port 8000
 """
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from database import create_tables
 
-# Import all routers
 from routers import auth, feed, cards, radar, shield, profile, search, notifications
 
 
-# ── Lifespan: startup / shutdown ──
+# ── Manual CORS fix for preflight OPTIONS ──
+class CORSPreflight(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "*",
+                    "Access-Control-Allow-Headers": "*",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run tasks on startup and shutdown."""
-    # ── Startup ──
     print("\n🚀 Verilay API starting up...")
-    print("📦 Creating database tables...")
     await create_tables()
-    print("✅ Database tables ready")
-    print("🌐 API docs available at: http://localhost:8000/docs\n")
+    print("✅ Database tables ready\n")
     yield
-    # ── Shutdown ──
     print("\n👋 Verilay API shutting down...\n")
 
 
-# ── Create FastAPI App ──
 app = FastAPI(
     title="Verilay API",
-    description=(
-        "The Layer of Truth the Internet Needs. "
-        "Backend API for the Verilay truth verification platform."
-    ),
+    description="The Layer of Truth the Internet Needs.",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-
-# ── CORS Middleware ──
+# Add BOTH middlewares — manual one catches OPTIONS, standard one handles rest
+app.add_middleware(CORSPreflight)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,8 +59,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ── Register Routers ──
 app.include_router(auth.router)
 app.include_router(feed.router)
 app.include_router(cards.router)
@@ -65,21 +69,13 @@ app.include_router(search.router)
 app.include_router(notifications.router)
 
 
-# ── Health Check ──
 @app.get("/", tags=["Health"])
 async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "ok",
-        "app": "Verilay API",
-        "version": "1.0.0",
-        "tagline": "The Layer of Truth the Internet Needs",
-    }
+    return {"status": "ok", "app": "Verilay API", "version": "1.0.0"}
 
 
 @app.get("/api", tags=["Health"])
 async def api_info():
-    """API info endpoint."""
     return {
         "status": "ok",
         "endpoints": {
@@ -92,6 +88,4 @@ async def api_info():
             "search": "/api/search",
             "notifications": "/api/notifications",
         },
-        "docs": "/docs",
-        "redoc": "/redoc",
     }
