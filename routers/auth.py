@@ -82,7 +82,7 @@ async def get_current_user(
 @router.post("/send-otp")
 async def send_otp(request: SendOTPRequest):
     """Send a 6-digit OTP to the provided email address."""
-    otp = otp_service.store_otp(request.email)
+    otp = otp_service.send_otp(request.email)
     await otp_service.send_otp_email(request.email, otp)
     return {"message": "OTP sent successfully", "email": request.email}
 
