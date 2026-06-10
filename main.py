@@ -4,33 +4,13 @@ Verilay — Main Application
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from fastapi import FastAPI
+from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.responses import Response as StarletteResponse
 
 from database import create_tables
 
 from routers import auth, feed, cards, radar, shield, profile, search, notifications
-
-
-# ── Manual CORS fix for preflight OPTIONS ──
-class CORSPreflight(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "*",
-                    "Access-Control-Allow-Headers": "*",
-                },
-            )
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        return response
 
 
 @asynccontextmanager
@@ -47,16 +27,6 @@ app = FastAPI(
     description="The Layer of Truth the Internet Needs.",
     version="1.0.0",
     lifespan=lifespan,
-)
-
-# Add BOTH middlewares — manual one catches OPTIONS, standard one handles rest
-app.add_middleware(CORSPreflight)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 app.include_router(auth.router)
@@ -89,3 +59,43 @@ async def api_info():
             "notifications": "/api/notifications",
         },
     }
+
+
+# ── Raw ASGI CORS — handles OPTIONS before anything else ──
+_inner = app
+
+class CORSWrapper:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] == "OPTIONS":
+            response = StarletteResponse(
+                content="OK",
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
+            await response(scope, receive, send)
+            return
+
+        async def send_with_cors(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"access-control-allow-origin", b"*"))
+                headers.append((b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS, PATCH"))
+                headers.append((b"access-control-allow-headers", b"*"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
+
+app = CORSWrapper(_inner)
