@@ -35,6 +35,15 @@ class TruthCard(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
+    # ── Optional link back to the Radar mention this card responds to ──
+    # SET NULL so deleting a mention keeps the published card intact.
+    mention_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mentions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # ── Card Content ──
     status: Mapped[CardStatus] = mapped_column(Enum(CardStatus), nullable=False)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
