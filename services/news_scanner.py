@@ -1,40 +1,115 @@
 """
 Verilay — News Scanner Service
-Scans Google News RSS, Reddit, Hacker News, NewsData.io, and GNews.io for mentions.
+Scans many sources for mentions and enriches each with engagement where available.
 
-Engagement enrichment:
-  • Reddit returns REAL upvotes + comments per post.
-  • Hacker News (Algolia) returns REAL points + comments per story.
-  • Google News RSS / NewsData / GNews do not expose engagement → reach left 0.
+Why several sources: Google News RSS and Reddit block datacenter/cloud IPs
+(503/403 from Render), so we lean on server-friendly sources too:
+  • GDELT      — free, no key, near-real-time GLOBAL news index (best coverage)
+  • Bing News  — RSS, server-tolerant with a browser User-Agent
+  • Hacker News (Algolia) — real points + comments
+  • Reddit     — real upvotes + comments (often blocked on cloud IPs)
+  • Google News RSS — often 503 on cloud IPs; kept as a bonus
+  • NewsData.io / GNews.io — optional, need free API keys
 
-Each result is a dict:
-  {
-    "headline": str,
-    "source":   str,
-    "url":      str,
-    "published_at": str,
-    "platform": "reddit" | "hackernews" | "google" | "newsdata" | "gnews",
-    "reach":    int,          # engagement-derived (real where available, else 0)
-    "share_count": int,       # comments where available
-    "engagement": dict,       # platform-specific real metrics
-  }
+All sources run concurrently; one failing never breaks the others.
+
+Each result dict:
+  { headline, source, url, published_at, platform, reach, share_count, engagement }
 """
 
+import asyncio
 import httpx
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from urllib.parse import quote
 
+# A realistic desktop browser UA helps with Google/Bing bot filtering.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 class NewsScanner:
-    """Scans multiple sources; Google News, Reddit and Hacker News need no API keys."""
+    """Multi-source scanner. GDELT, Bing, Google News and Hacker News need no keys."""
+
+    # ── GDELT: free, no key, global, near-real-time (primary coverage) ──
+    @staticmethod
+    async def scan_gdelt(query: str) -> list[dict]:
+        url = "https://api.gdeltproject.org/api/v2/doc/doc"
+        params = {
+            "query": f'"{query}"',
+            "mode": "ArtList",
+            "maxrecords": "30",
+            "format": "json",
+            "sort": "DateDesc",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=12.0, headers={"User-Agent": BROWSER_UA}) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+
+            results = []
+            for a in data.get("articles", []):
+                title = a.get("title") or ""
+                if not title:
+                    continue
+                results.append({
+                    "headline": title,
+                    "source": a.get("domain", "News"),
+                    "url": a.get("url", ""),
+                    "published_at": a.get("seendate", ""),
+                    "platform": "gdelt",
+                    "reach": 0,
+                    "share_count": 0,
+                    "engagement": {},
+                })
+            print(f"[NewsScanner] GDELT: {len(results)} results for '{query}'")
+            return results
+        except Exception as e:
+            print(f"[NewsScanner] GDELT error: {e}")
+            return []
+
+    # ── Bing News RSS: server-tolerant with a browser UA ──
+    @staticmethod
+    async def scan_bing_news(query: str) -> list[dict]:
+        url = f"https://www.bing.com/news/search?q={quote(query)}&format=rss"
+        try:
+            async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": BROWSER_UA}) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+
+            root = ET.fromstring(response.text)
+            results = []
+            for item in root.findall(".//item")[:15]:
+                title = item.findtext("title", "")
+                link = item.findtext("link", "")
+                pub_date = item.findtext("pubDate", "")
+                if not title:
+                    continue
+                results.append({
+                    "headline": title,
+                    "source": "Bing News",
+                    "url": link,
+                    "published_at": pub_date,
+                    "platform": "bing",
+                    "reach": 0,
+                    "share_count": 0,
+                    "engagement": {},
+                })
+            print(f"[NewsScanner] Bing News: {len(results)} results for '{query}'")
+            return results
+        except Exception as e:
+            print(f"[NewsScanner] Bing News error: {e}")
+            return []
 
     @staticmethod
     async def scan_google_news(query: str) -> list[dict]:
-        """Google News RSS — FREE. No engagement metrics available from RSS."""
+        """Google News RSS — often 503 on cloud IPs; UA gives it a better chance."""
         url = f"https://news.google.com/rss/search?q={quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": BROWSER_UA}) as client:
                 response = await client.get(url)
                 response.raise_for_status()
 
@@ -45,7 +120,6 @@ class NewsScanner:
                 source = item.findtext("source", "Google News")
                 link = item.findtext("link", "")
                 pub_date = item.findtext("pubDate", "")
-
                 if any(word.lower() in title.lower() for word in query.split()):
                     results.append({
                         "headline": title,
@@ -65,7 +139,7 @@ class NewsScanner:
 
     @staticmethod
     async def scan_reddit(query: str) -> list[dict]:
-        """Reddit search — FREE. Returns REAL upvotes + comments per post."""
+        """Reddit — REAL upvotes + comments. Often 403 on cloud IPs (needs OAuth to fix)."""
         url = f"https://www.reddit.com/search.json?q={quote(query)}&sort=new&limit=12"
         headers = {"User-Agent": "Verilay/1.0 (reputation monitor)"}
         try:
@@ -87,7 +161,6 @@ class NewsScanner:
                         d.get("created_utc", 0)
                     ).isoformat() if d.get("created_utc") else "",
                     "platform": "reddit",
-                    # Reach = upvotes + weighted comments (a comment ≈ deeper engagement).
                     "reach": upvotes + comments * 2,
                     "share_count": comments,
                     "engagement": {"upvotes": upvotes, "comments": comments},
@@ -100,7 +173,7 @@ class NewsScanner:
 
     @staticmethod
     async def scan_hackernews(query: str) -> list[dict]:
-        """Hacker News via Algolia — FREE. Returns REAL points + comments."""
+        """Hacker News via Algolia — REAL points + comments."""
         url = f"https://hn.algolia.com/api/v1/search?query={quote(query)}&tags=story&hitsPerPage=10"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
@@ -134,7 +207,6 @@ class NewsScanner:
 
     @staticmethod
     async def scan_newsdata(query: str, api_key: str) -> list[dict]:
-        """NewsData.io API (needs free API key). No engagement metrics."""
         if not api_key:
             return []
         url = "https://newsdata.io/api/1/news"
@@ -157,6 +229,7 @@ class NewsScanner:
                     "share_count": 0,
                     "engagement": {},
                 })
+            print(f"[NewsScanner] NewsData.io: {len(results)} results for '{query}'")
             return results
         except Exception as e:
             print(f"[NewsScanner] NewsData.io error: {e}")
@@ -164,7 +237,6 @@ class NewsScanner:
 
     @staticmethod
     async def scan_gnews(query: str, api_key: str) -> list[dict]:
-        """GNews.io API (needs free API key). No engagement metrics."""
         if not api_key:
             return []
         url = "https://gnews.io/api/v4/search"
@@ -187,6 +259,7 @@ class NewsScanner:
                     "share_count": 0,
                     "engagement": {},
                 })
+            print(f"[NewsScanner] GNews.io: {len(results)} results for '{query}'")
             return results
         except Exception as e:
             print(f"[NewsScanner] GNews.io error: {e}")
@@ -199,24 +272,29 @@ class NewsScanner:
         gnews_key: str = "",
     ) -> list[dict]:
         """
-        Scan ALL sources and return combined, deduplicated results.
-        Google News + Reddit + Hacker News work without any API keys.
-        Each source is independent — one failing never breaks the others.
+        Scan ALL sources CONCURRENTLY and return combined, deduplicated results.
+        GDELT + Bing + Google News + Hacker News + Reddit need no keys.
         """
-        all_results = []
-
-        # Free, no keys needed
-        all_results.extend(await NewsScanner.scan_google_news(query))
-        all_results.extend(await NewsScanner.scan_reddit(query))
-        all_results.extend(await NewsScanner.scan_hackernews(query))
-
-        # Keyed sources (optional)
+        tasks = [
+            NewsScanner.scan_gdelt(query),
+            NewsScanner.scan_bing_news(query),
+            NewsScanner.scan_google_news(query),
+            NewsScanner.scan_hackernews(query),
+            NewsScanner.scan_reddit(query),
+        ]
         if newsdata_key:
-            all_results.extend(await NewsScanner.scan_newsdata(query, newsdata_key))
+            tasks.append(NewsScanner.scan_newsdata(query, newsdata_key))
         if gnews_key:
-            all_results.extend(await NewsScanner.scan_gnews(query, gnews_key))
+            tasks.append(NewsScanner.scan_gnews(query, gnews_key))
 
-        # Deduplicate by headline (keep the one with the highest reach)
+        settled = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_results = []
+        for r in settled:
+            if isinstance(r, list):
+                all_results.extend(r)
+
+        # Deduplicate by headline (keep the one with the highest reach).
         best: dict[str, dict] = {}
         for item in all_results:
             key = (item.get("headline") or "").lower().strip()
