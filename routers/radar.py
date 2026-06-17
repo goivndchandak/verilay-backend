@@ -92,9 +92,9 @@ async def scan_news(
                 select(Mention.id).where(
                     Mention.user_id == current_user.id,
                     Mention.headline == headline,
-                )
+                ).limit(1)
             )
-            if existing.scalar_one_or_none():
+            if existing.first():
                 continue
 
             reach = int(article.get("reach", 0) or 0)
