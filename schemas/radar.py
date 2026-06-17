@@ -1,6 +1,6 @@
 """
 Verilay — Radar Schemas
-Mention responses, risk scores, scanning results, and weekly stats.
+Mention responses, risk scores, scanning results, weekly stats, and velocity.
 """
 
 from uuid import UUID
@@ -32,6 +32,11 @@ class MentionResponse(BaseModel):
     response_statement: str | None = None
     created_at: datetime
 
+    # ── Computed intelligence (filled at read-time, not stored) ──
+    sentiment: str | None = None          # positive | negative | neutral
+    sentiment_score: float | None = None  # -1.0 .. 1.0
+    credibility: str | None = None        # high | medium | low
+
 
 class RiskScoreResponse(BaseModel):
     """Risk score circle data for the Radar tab."""
@@ -61,3 +66,12 @@ class ScanResponse(BaseModel):
     new_mentions: int
     total_mentions: int
     scan_duration_ms: int
+
+
+class VelocityResponse(BaseModel):
+    """Acceleration of mentions over the recent window."""
+    buckets: list[int]      # mentions per hour, oldest → newest
+    last_hour: int
+    prev_hour: int
+    trend: str              # accelerating | steady | cooling
+    window_hours: int
