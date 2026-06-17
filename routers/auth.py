@@ -5,7 +5,6 @@ Endpoints: send-otp, verify-otp, register, me
 """
 
 from datetime import datetime, timezone, timedelta
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -23,7 +22,7 @@ from schemas.auth import (
     TokenResponse,
     UserMinimal,
 )
-from services.otp_service import otp_service
+from services.otp_service import otp_service, OTPError
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 settings = get_settings()
@@ -82,7 +81,13 @@ async def get_current_user(
 @router.post("/send-otp")
 async def send_otp(request: SendOTPRequest):
     """Send a 6-digit OTP to the provided email address."""
-    otp = otp_service.send_otp(request.email)
+    try:
+        await otp_service.send_otp(request.email)
+    except OTPError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+        )
     return {"message": "OTP sent successfully", "email": request.email}
 
 
@@ -93,22 +98,25 @@ async def send_otp(request: SendOTPRequest):
 async def verify_otp(request: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
     """
     Verify the OTP. If user exists, return a JWT token.
-    If user doesn't exist, return needs_registration flag.
+    If the user doesn't exist, keep the OTP valid and return needs_registration
+    so the client can complete sign-up with the same code.
     """
-    if not otp_service.verify_otp(request.email, request.otp):
+    # Validate WITHOUT consuming — we may still need it for registration.
+    if not otp_service.verify_otp(request.email, request.otp, consume=False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired OTP",
         )
 
-    # Check if user exists
-    result = await db.execute(select(User).where(User.email == request.email))
+    result = await db.execute(select(User).where(User.email == request.email.lower()))
     user = result.scalar_one_or_none()
 
     if user is None:
+        # Leave the OTP intact so /register can reuse it.
         return {"needs_registration": True, "email": request.email}
 
-    # User exists — issue JWT
+    # Existing user — consume the OTP and issue a token.
+    otp_service.consume(request.email)
     token = create_access_token(data={"sub": user.email})
     return TokenResponse(
         access_token=token,
@@ -127,15 +135,15 @@ async def register(
     Register a new user after OTP verification.
     Creates the user and returns a JWT token.
     """
-    # Verify OTP again (user must verify before registering)
-    if not otp_service.verify_otp(request.email, request.otp):
+    # Final OTP check — consume it this time.
+    if not otp_service.verify_otp(request.email, request.otp, consume=True):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired OTP. Please request a new one.",
         )
 
     # Check if email already exists
-    result = await db.execute(select(User).where(User.email == request.email))
+    result = await db.execute(select(User).where(User.email == request.email.lower()))
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
