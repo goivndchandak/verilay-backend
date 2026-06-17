@@ -34,19 +34,32 @@ RISK_KEYWORDS = {
     "fraud", "scam", "arrest", "arrested", "fake", "controversy", "allegation",
     "allegations", "accused", "lawsuit", "banned", "leak", "leaked", "scandal",
     "fired", "probe", "raid", "fir", "defamation", "hoax", "misleading",
-    "investigation", "fine", "penalty", "ban",
+    "investigation", "fine", "penalty", "ban", "sue", "sued", "fraudulent",
 }
 
 
-def _severity_for(headline: str) -> SeverityLevel:
-    """Lightweight severity heuristic based on risk keywords in the headline."""
+def _severity_for(headline: str, reach: int = 0) -> SeverityLevel:
+    """
+    Severity from BOTH risk keywords AND engagement reach.
+    A negative story with high reach is more urgent than the same story unseen.
+    """
     text = (headline or "").lower()
     hits = sum(1 for kw in RISK_KEYWORDS if kw in text)
+
+    level = 0  # 0=LOW, 1=MODERATE, 2=URGENT
     if hits >= 2:
-        return SeverityLevel.URGENT
-    if hits == 1:
-        return SeverityLevel.MODERATE
-    return SeverityLevel.LOW
+        level = 2
+    elif hits == 1:
+        level = 1
+
+    # Escalate by reach (real engagement from Reddit / Hacker News)
+    if reach >= 5000:
+        level += 1
+    elif reach >= 1000 and level == 0:
+        level = 1
+
+    level = min(level, 2)
+    return [SeverityLevel.LOW, SeverityLevel.MODERATE, SeverityLevel.URGENT][level]
 
 
 # ─────────────────────────────────────────────
@@ -59,44 +72,59 @@ async def scan_news(
 ):
     """
     Trigger a real-time news scan for the current user.
-    Searches Google News, Reddit, and optional paid APIs.
+    Robust by design: any source/row failure is swallowed so the scan never 500s.
     """
     scan_start = datetime.now(timezone.utc)
 
-    raw_articles = await news_scanner.scan_all(
-        current_user.full_name,
-        settings.NEWSDATA_API_KEY,
-        settings.GNEWS_API_KEY,
-    )
+    try:
+        raw_articles = await news_scanner.scan_all(
+            current_user.full_name,
+            settings.NEWSDATA_API_KEY,
+            settings.GNEWS_API_KEY,
+        )
+    except Exception as e:
+        print(f"[Radar] scan_all failed: {e}")
+        raw_articles = []
 
     new_count = 0
     for article in raw_articles:
-        headline = (article.get("headline") or "").strip()
-        if not headline:
-            continue
+        try:
+            headline = (article.get("headline") or "").strip()
+            if not headline:
+                continue
 
-        # Skip if we already have this headline for the user.
-        existing = await db.execute(
-            select(Mention).where(
-                Mention.user_id == current_user.id,
-                Mention.headline == headline,
+            # Skip duplicates we already track for this user.
+            existing = await db.execute(
+                select(Mention.id).where(
+                    Mention.user_id == current_user.id,
+                    Mention.headline == headline,
+                )
             )
-        )
-        if existing.scalar_one_or_none():
-            continue
+            if existing.scalar_one_or_none():
+                continue
 
-        mention = Mention(
-            user_id=current_user.id,
-            source=article.get("source", "Unknown"),
-            headline=headline,
-            url=article.get("url") or None,
-            reach=article.get("reach", 0),
-            severity=_severity_for(headline),
-            status=MentionStatus.PENDING,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(mention)
-        new_count += 1
+            reach = int(article.get("reach", 0) or 0)
+            platform = article.get("platform", "google")
+            engagement = article.get("engagement") or {}
+
+            mention = Mention(
+                user_id=current_user.id,
+                source=article.get("source", "Unknown"),
+                headline=headline,
+                url=article.get("url") or None,
+                reach=reach,
+                share_count=int(article.get("share_count", 0) or 0),
+                # Store per-platform engagement so the UI can show real numbers.
+                platform_spread={platform: {"reach": reach, **engagement}},
+                severity=_severity_for(headline, reach),
+                status=MentionStatus.PENDING,
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(mention)
+            new_count += 1
+        except Exception as e:
+            print(f"[Radar] skipped one article: {e}")
+            continue
 
     await db.commit()
 
@@ -178,7 +206,6 @@ async def respond_to_mention(
     db: AsyncSession = Depends(get_db),
 ):
     """Respond to a mention: Accept, Deny, or Modify (also publishes a Truth Card)."""
-    # Validate the action against the allowed statuses.
     try:
         mention_status = MentionStatus(data.action)
         card_status = CardStatus(data.action)
@@ -197,7 +224,6 @@ async def respond_to_mention(
     if not mention:
         raise HTTPException(status_code=404, detail="Mention not found")
 
-    # Resolve the statement: use the user's text, else a sensible default.
     if data.statement and data.statement.strip():
         statement = data.statement.strip()
     else:
@@ -212,10 +238,8 @@ async def respond_to_mention(
     mention.response_statement = statement
     mention.responded_at = datetime.now(timezone.utc)
 
-    # Audit log
     db.add(MentionAction(mention_id=mention.id, action_type=data.action))
 
-    # ── Create / update the linked Truth Card so it appears in the Feed ──
     existing_card = await db.execute(
         select(TruthCard)
         .where(TruthCard.user_id == current_user.id)
