@@ -21,7 +21,7 @@ class NewsScanner:
         """Scan Google News RSS feed — FREE, no API key needed."""
         url = f"https://news.google.com/rss/search?q={quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
         try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.get(url)
                 response.raise_for_status()
 
@@ -53,7 +53,7 @@ class NewsScanner:
         url = f"https://www.reddit.com/search.json?q={quote(query)}&sort=new&limit=10"
         headers = {"User-Agent": "Verilay/1.0"}
         try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
@@ -83,7 +83,7 @@ class NewsScanner:
         url = "https://newsdata.io/api/1/news"
         params = {"apikey": api_key, "q": query, "language": "en"}
         try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
@@ -109,7 +109,7 @@ class NewsScanner:
         url = "https://gnews.io/api/v4/search"
         params = {"token": api_key, "q": query, "lang": "en", "max": 10}
         try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
@@ -147,17 +147,15 @@ class NewsScanner:
 
         # Scan these if API keys are available
         if newsdata_key:
-            nd_results = await NewsScanner.scan_newsdata(query, newsdata_key)
-            all_results.extend(nd_results)
+            all_results.extend(await NewsScanner.scan_newsdata(query, newsdata_key))
         if gnews_key:
-            gn_results = await NewsScanner.scan_gnews(query, gnews_key)
-            all_results.extend(gn_results)
+            all_results.extend(await NewsScanner.scan_gnews(query, gnews_key))
 
         # Deduplicate by headline
         seen = set()
         unique = []
         for item in all_results:
-            key = item["headline"].lower().strip()
+            key = (item.get("headline") or "").lower().strip()
             if key and key not in seen:
                 seen.add(key)
                 unique.append(item)
