@@ -39,34 +39,34 @@ async def calculate_user_trust_score(user_id: UUID, db: AsyncSession) -> int:
     """
     Calculate an overall trust score (0-100) for a user.
     Based on: vouch rate, number of cards, and verification tier.
+
+    Weighting (max 100):
+      • Vouch rate    → up to 65 points
+      • Activity      → up to 20 points (1 per card, capped at 20)
+      • Verification  → up to 15 points (tier * 5; tiers run 0-3)
     """
     from models.card import TruthCard
     from models.user import User
 
-    # Get vouch rate
+    # Vouch rate
     vouch_rate = await calculate_vouch_rate(user_id, db)
 
-    # Get card count
+    # Card count
     result = await db.execute(
         select(func.count(TruthCard.id)).where(TruthCard.user_id == user_id)
     )
     card_count = result.scalar() or 0
 
-    # Get verification tier
+    # Verification tier
     result = await db.execute(
         select(User.verification_tier).where(User.id == user_id)
     )
     tier = result.scalar() or 0
 
     # ── Score formula ──
-    # Base: vouch rate contributes up to 60 points
-    base_score = (vouch_rate / 100) * 60
-
-    # Activity bonus: up to 20 points (1 point per card, max 20)
-    activity_bonus = min(card_count, 20)
-
-    # Verification bonus: up to 20 points
-    verification_bonus = tier * 5  # Tier 0=0, 1=5, 2=10, 3=15, 4=20
+    base_score = (vouch_rate / 100) * 65          # up to 65
+    activity_bonus = min(card_count, 20)          # up to 20
+    verification_bonus = min(tier * 5, 15)        # up to 15 (tier 0-3)
 
     total = base_score + activity_bonus + verification_bonus
     return min(int(round(total)), 100)
