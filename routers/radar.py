@@ -1,6 +1,6 @@
 """
 Verilay — Radar Router
-News scanning, mention management, risk scoring, and weekly stats.
+News scanning, mention management, risk scoring, velocity, and weekly stats.
 """
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -20,9 +20,11 @@ from schemas.radar import (
     MentionRespondRequest,
     WeeklyStatsResponse,
     ScanResponse,
+    VelocityResponse,
 )
 from services.news_scanner import news_scanner
 from services.risk_engine import calculate_risk, get_level, get_spike
+from services.intelligence import analyze_sentiment, credibility_for, compute_velocity
 from routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/radar", tags=["Radar"])
@@ -39,10 +41,7 @@ RISK_KEYWORDS = {
 
 
 def _severity_for(headline: str, reach: int = 0) -> SeverityLevel:
-    """
-    Severity from BOTH risk keywords AND engagement reach.
-    A negative story with high reach is more urgent than the same story unseen.
-    """
+    """Severity from BOTH risk keywords AND engagement reach."""
     text = (headline or "").lower()
     hits = sum(1 for kw in RISK_KEYWORDS if kw in text)
 
@@ -52,7 +51,6 @@ def _severity_for(headline: str, reach: int = 0) -> SeverityLevel:
     elif hits == 1:
         level = 1
 
-    # Escalate by reach (real engagement from Reddit / Hacker News)
     if reach >= 5000:
         level += 1
     elif reach >= 1000 and level == 0:
@@ -70,10 +68,7 @@ async def scan_news(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Trigger a real-time news scan for the current user.
-    Robust by design: any source/row failure is swallowed so the scan never 500s.
-    """
+    """Trigger a real-time news scan. Hardened so it never 500s."""
     scan_start = datetime.now(timezone.utc)
 
     try:
@@ -93,7 +88,6 @@ async def scan_news(
             if not headline:
                 continue
 
-            # Skip duplicates we already track for this user.
             existing = await db.execute(
                 select(Mention.id).where(
                     Mention.user_id == current_user.id,
@@ -114,7 +108,6 @@ async def scan_news(
                 url=article.get("url") or None,
                 reach=reach,
                 share_count=int(article.get("share_count", 0) or 0),
-                # Store per-platform engagement so the UI can show real numbers.
                 platform_spread={platform: {"reach": reach, **engagement}},
                 severity=_severity_for(headline, reach),
                 status=MentionStatus.PENDING,
@@ -151,14 +144,39 @@ async def get_mentions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all mentions for the current user, sorted by most recent."""
+    """All mentions for the user, enriched with sentiment + source credibility."""
     result = await db.execute(
         select(Mention)
         .where(Mention.user_id == current_user.id)
         .order_by(desc(Mention.created_at))
     )
     mentions = result.scalars().all()
-    return [MentionResponse.model_validate(m) for m in mentions]
+
+    out: list[MentionResponse] = []
+    for m in mentions:
+        mr = MentionResponse.model_validate(m)
+        sent = analyze_sentiment(m.headline)
+        mr.sentiment = sent["label"]
+        mr.sentiment_score = sent["score"]
+        mr.credibility = credibility_for(m.source)["tier"]
+        out.append(mr)
+    return out
+
+
+# ─────────────────────────────────────────────
+# GET /api/radar/velocity
+# ─────────────────────────────────────────────
+@router.get("/velocity", response_model=VelocityResponse)
+async def get_velocity(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Is coverage accelerating? Mentions-per-hour over the last 12 hours."""
+    result = await db.execute(
+        select(Mention).where(Mention.user_id == current_user.id)
+    )
+    mentions = result.scalars().all()
+    return VelocityResponse(**compute_velocity(mentions))
 
 
 # ─────────────────────────────────────────────
@@ -266,7 +284,12 @@ async def respond_to_mention(
     await db.commit()
     await db.refresh(mention)
 
-    return MentionResponse.model_validate(mention)
+    mr = MentionResponse.model_validate(mention)
+    sent = analyze_sentiment(mention.headline)
+    mr.sentiment = sent["label"]
+    mr.sentiment_score = sent["score"]
+    mr.credibility = credibility_for(mention.source)["tier"]
+    return mr
 
 
 # ─────────────────────────────────────────────
