@@ -1,16 +1,24 @@
 """
-Verilay — Database Setup (SQLite for local dev)
+Verilay — Database Setup
+Reads DATABASE_URL from config (SQLite for local dev, Postgres in production).
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
-DATABASE_URL = "sqlite+aiosqlite:///verilay.db"
+from config import get_settings
+
+settings = get_settings()
+
+DATABASE_URL = settings.DATABASE_URL
+
+# check_same_thread is a SQLite-only connect argument.
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False},
+    connect_args=connect_args,
 )
 
 async_session = async_sessionmaker(
@@ -37,5 +45,8 @@ async def get_db():
 
 
 async def create_tables():
+    # Import models so every table is registered on Base.metadata before create_all.
+    import models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
