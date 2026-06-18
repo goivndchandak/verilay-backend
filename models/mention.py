@@ -48,6 +48,7 @@ class Mention(Base):
     # e.g. "Indian Express", "Twitter / X"
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # ── Metrics ──
     reach: Mapped[int] = mapped_column(Integer, default=0)
