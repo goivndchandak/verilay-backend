@@ -61,6 +61,7 @@ class NewsScanner:
                     "url": a.get("url", ""),
                     "published_at": a.get("seendate", ""),
                     "platform": "gdelt",
+                    "image": a.get("socialimage", ""),
                     "reach": 0,
                     "share_count": 0,
                     "engagement": {},
