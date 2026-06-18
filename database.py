@@ -88,3 +88,19 @@ async def create_tables():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # ── Additive migrations (safe, idempotent) ──
+    # create_all does NOT add new columns to existing tables, so on persistent
+    # Postgres we add them explicitly. Each runs in its own transaction so one
+    # failing (e.g. SQLite, which lacks IF NOT EXISTS) never blocks the others.
+    migrations = [
+        "ALTER TABLE mentions ADD COLUMN IF NOT EXISTS image_url VARCHAR(1000)",
+        "ALTER TABLE truth_cards ADD COLUMN IF NOT EXISTS image_url VARCHAR(1000)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS social_links JSON",
+    ]
+    for stmt in migrations:
+        try:
+            async with engine.begin() as conn:
+                await conn.exec_driver_sql(stmt)
+        except Exception as e:
+            print(f"[migrate] skipped ({stmt[:45]}...): {e}")
