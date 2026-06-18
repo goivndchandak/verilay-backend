@@ -53,6 +53,7 @@ class TruthCard(Base):
     news_headline: Mapped[str | None] = mapped_column(String(500), nullable=True)
     news_source: Mapped[str | None] = mapped_column(String(200), nullable=True)
     news_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # ── Trust Metrics (denormalized for fast feed rendering) ──
     vouch_count: Mapped[int] = mapped_column(Integer, default=0)
