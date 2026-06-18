@@ -23,6 +23,7 @@ class MentionResponse(BaseModel):
     source: str
     headline: str
     url: str | None = None
+    image_url: str | None = None
     reach: int
     share_count: int
     severity: str
