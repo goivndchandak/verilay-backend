@@ -60,6 +60,7 @@ async def _build_profile(user: User, db: AsyncSession) -> UserProfile:
         email=user.email,
         bio=user.bio,
         profile_picture_url=user.profile_picture_url,
+        social_links=user.social_links,
         is_verified=user.is_verified,
         verification_tier=user.verification_tier,
         claims_resolved=claims_resolved,
@@ -125,6 +126,8 @@ async def update_profile(
         current_user.bio = data.bio
     if data.profile_picture_url is not None:
         current_user.profile_picture_url = data.profile_picture_url
+    if data.social_links is not None:
+        current_user.social_links = data.social_links
 
     await db.flush()
     await db.refresh(current_user)
@@ -160,11 +163,13 @@ async def get_truth_log(
         CardResponse(
             id=c.id,
             user=CardUserInfo.model_validate(c.user),
+            mention_id=c.mention_id,
             status=c.status.value,
             statement=c.statement,
             news_headline=c.news_headline,
             news_source=c.news_source,
             news_url=c.news_url,
+            image_url=c.image_url,
             vouch_count=c.vouch_count,
             counter_count=c.counter_count,
             trust_percentage=c.trust_percentage,
