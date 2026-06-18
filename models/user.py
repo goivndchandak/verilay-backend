@@ -6,7 +6,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Boolean, Integer, DateTime, ForeignKey, Enum, Text
+from sqlalchemy import String, Boolean, Integer, DateTime, ForeignKey, Enum, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import Uuid as UUID
 
@@ -39,6 +39,8 @@ class User(Base):
     )
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     profile_picture_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    social_links: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # e.g. {"instagram": "handle", "twitter": "handle", "website": "https://..."}
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     verification_tier: Mapped[int] = mapped_column(Integer, default=0)
     # 0 = unverified, 1 = email verified, 2 = identity verified, 3 = org verified
