@@ -18,6 +18,7 @@ class UserProfile(BaseModel):
     email: str
     bio: str | None = None
     profile_picture_url: str | None = None
+    social_links: dict | None = None
     is_verified: bool
     verification_tier: int
 
@@ -36,6 +37,7 @@ class UserUpdate(BaseModel):
     full_name: str | None = None
     bio: str | None = None
     profile_picture_url: str | None = None
+    social_links: dict | None = None
 
 
 class FollowResponse(BaseModel):
