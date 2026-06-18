@@ -15,6 +15,7 @@ class CardCreate(BaseModel):
     news_headline: str | None = None
     news_source: str | None = None
     news_url: str | None = None
+    news_image: str | None = None
 
 
 class CardUserInfo(BaseModel):
@@ -34,11 +35,13 @@ class CardResponse(BaseModel):
 
     id: UUID
     user: CardUserInfo
+    mention_id: UUID | None = None
     status: str
     statement: str
     news_headline: str | None = None
     news_source: str | None = None
     news_url: str | None = None
+    image_url: str | None = None
     vouch_count: int
     counter_count: int
     trust_percentage: float
