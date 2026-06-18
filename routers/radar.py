@@ -101,13 +101,13 @@ async def scan_news(
             platform = article.get("platform", "google")
             engagement = article.get("engagement") or {}
 
-                                    mention = Mention(
+            mention = Mention(
                 user_id=current_user.id,
                 source=article.get("source", "Unknown"),
                 headline=headline,
                 url=article.get("url") or None,
                 reach=reach,
-                image_url=article.get("image") or None,          # ← ADD THIS LINE
+                image_url=article.get("image") or None,
                 share_count=int(article.get("share_count", 0) or 0),
                 platform_spread={platform: {"reach": reach, **engagement}},
                 severity=_severity_for(headline, reach),
@@ -270,7 +270,7 @@ async def respond_to_mention(
         card.statement = statement
         card.status = card_status
     else:
-                card = TruthCard(
+        card = TruthCard(
             user_id=current_user.id,
             mention_id=mention.id,
             status=card_status,
@@ -278,7 +278,7 @@ async def respond_to_mention(
             news_headline=mention.headline,
             news_source=mention.source,
             news_url=mention.url,
-            image_url=mention.image_url,                          # ← ADD THIS LINE
+            image_url=mention.image_url,
             trust_percentage=0.0,
         )
         db.add(card)
