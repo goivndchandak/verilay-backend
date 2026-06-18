@@ -24,11 +24,13 @@ def build_card_response(card: TruthCard, user_reaction: str | None = None) -> Ca
     return CardResponse(
         id=card.id,
         user=CardUserInfo.model_validate(card.user),
+        mention_id=card.mention_id,
         status=card.status.value if hasattr(card.status, "value") else card.status,
         statement=card.statement,
         news_headline=card.news_headline,
         news_source=card.news_source,
         news_url=card.news_url,
+        image_url=card.image_url,
         vouch_count=card.vouch_count,
         counter_count=card.counter_count,
         trust_percentage=card.trust_percentage,
