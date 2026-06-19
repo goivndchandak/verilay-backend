@@ -25,6 +25,7 @@ from schemas.radar import (
 from services.news_scanner import news_scanner
 from services.risk_engine import calculate_risk, get_level, get_spike
 from services.intelligence import analyze_sentiment, credibility_for, compute_velocity
+from services.identity import classify_category, match_confidence
 from routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/radar", tags=["Radar"])
@@ -100,6 +101,11 @@ async def scan_news(
             reach = int(article.get("reach", 0) or 0)
             platform = article.get("platform", "google")
             engagement = article.get("engagement") or {}
+            src = article.get("source", "")
+            category = classify_category(headline, src, platform)
+            confidence = match_confidence(
+                current_user.full_name, headline, src, current_user.social_links, []
+            )
 
             mention = Mention(
                 user_id=current_user.id,
@@ -108,6 +114,8 @@ async def scan_news(
                 url=article.get("url") or None,
                 reach=reach,
                 image_url=article.get("image") or None,
+                category=category,
+                match_confidence=confidence,
                 share_count=int(article.get("share_count", 0) or 0),
                 platform_spread={platform: {"reach": reach, **engagement}},
                 severity=_severity_for(headline, reach),
