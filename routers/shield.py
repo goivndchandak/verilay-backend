@@ -54,11 +54,13 @@ async def generate_response_card(
     # Create a truth card
     card = TruthCard(
         user_id=current_user.id,
+        mention_id=mention.id,
         status=CardStatus.DENIED,
         statement=f"This claim is false. I deny the allegations made in this report.",
         news_headline=mention.headline,
         news_source=mention.source,
         news_url=mention.url,
+        image_url=mention.image_url,
         trust_percentage=0.0,
     )
     db.add(card)
