@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     NEWSDATA_API_KEY: str = ""
     GNEWS_API_KEY: str = ""
 
+    # ── Reddit OAuth (optional; fixes the 403 from cloud IPs) ──
+    REDDIT_CLIENT_ID: str = ""
+    REDDIT_CLIENT_SECRET: str = ""
+    REDDIT_USER_AGENT: str = "Verilay/1.0 (reputation monitor)"
+
     # ── Redis (reserved for future use) ──
     REDIS_URL: str = "redis://localhost:6379/0"
 
