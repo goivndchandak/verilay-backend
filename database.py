@@ -97,6 +97,8 @@ async def create_tables():
         "ALTER TABLE mentions ADD COLUMN IF NOT EXISTS image_url VARCHAR(1000)",
         "ALTER TABLE truth_cards ADD COLUMN IF NOT EXISTS image_url VARCHAR(1000)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS social_links JSON",
+        "ALTER TABLE mentions ADD COLUMN IF NOT EXISTS category VARCHAR(30)",
+        "ALTER TABLE mentions ADD COLUMN IF NOT EXISTS match_confidence INTEGER DEFAULT 0",
     ]
     for stmt in migrations:
         try:
