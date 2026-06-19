@@ -49,6 +49,8 @@ class Mention(Base):
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    match_confidence: Mapped[int] = mapped_column(Integer, default=0)
 
     # ── Metrics ──
     reach: Mapped[int] = mapped_column(Integer, default=0)
