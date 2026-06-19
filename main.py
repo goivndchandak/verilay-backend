@@ -10,7 +10,7 @@ from starlette.responses import Response as StarletteResponse
 
 from database import create_tables
 
-from routers import auth, feed, cards, radar, shield, profile, search, notifications
+from routers import auth, feed, cards, radar, shield, profile, search, notifications, public
 
 
 @asynccontextmanager
@@ -37,6 +37,7 @@ app.include_router(shield.router)
 app.include_router(profile.router)
 app.include_router(search.router)
 app.include_router(notifications.router)
+app.include_router(public.router)
 
 
 @app.get("/", tags=["Health"])
