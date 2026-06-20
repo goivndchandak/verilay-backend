@@ -42,6 +42,7 @@ async def _get_user_mention(
 @router.post("/response-card", response_model=CardResponse)
 async def generate_response_card(
     mention_id: UUID,
+    statement: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -52,11 +53,12 @@ async def generate_response_card(
     mention = await _get_user_mention(mention_id, current_user, db)
 
     # Create a truth card
+    stmt = statement.strip() if (statement and statement.strip()) else "This claim is false. I deny the allegations made in this report."
     card = TruthCard(
         user_id=current_user.id,
         mention_id=mention.id,
         status=CardStatus.DENIED,
-        statement=f"This claim is false. I deny the allegations made in this report.",
+        statement=stmt,
         news_headline=mention.headline,
         news_source=mention.source,
         news_url=mention.url,
